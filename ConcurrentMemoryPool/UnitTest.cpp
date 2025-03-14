@@ -14,15 +14,16 @@ void Alloc2() {
 }
 
 void TLSTest() {
-    std::thread t1(Alloc1);
-    std::thread t2(Alloc2);
-
+    std::thread t1(Alloc1); 
     t1.join();
+
+    std::thread t2(Alloc2);
     t2.join();
 }
 
 int main() {
     //TestObjectPool();
+    cout << sizeof(PAGE_ID) << endl;
     TLSTest();
     return 0;
 }
