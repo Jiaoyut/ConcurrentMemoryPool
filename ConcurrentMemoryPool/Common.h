@@ -1,7 +1,16 @@
 #pragma once
 
 #include <iostream> 
+#include <unordered_map>
 #include <vector>
+#include <algorithm>
+#ifdef _WIN32
+    #include <Windows.h>
+#else
+    //Linux
+#endif // _WIN32
+
+
 
 #include <new>
 #include <time.h>
@@ -10,12 +19,15 @@
 #include <thread>
 #include <mutex>
 
+
 using std::bad_alloc;
 using std::cout;
 using std::endl;
 
 static const size_t MAX_BYTES = 256 * 1024;
 static const size_t NFREELIST = 208;
+static const size_t NPAGES = 129;
+static const size_t PAGE_SHIFT = 13;
   ;
 #ifdef _WIN64
     typedef unsigned long long PAGE_ID
@@ -24,6 +36,33 @@ static const size_t NFREELIST = 208;
 #elif
   //Linux下
 #endif 
+
+
+inline static void* SystemAlloc(size_t kpage) {
+      void* ptr = nullptr;
+
+    #ifdef _WIN32
+      // Windows平台使用VirtualAlloc，每页8KB（2^13）
+      ptr = VirtualAlloc(0, kpage << 13, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    #else
+      // Linux平台使用mmap分配匿名内存块
+      size_t total_size = kpage * (1 << 13); // 计算总字节数（8KB/page）
+      ptr = mmap(nullptr,
+          total_size,
+          PROT_READ | PROT_WRITE,
+          MAP_PRIVATE | MAP_ANONYMOUS,
+          -1, 0);  // 参数说明：匿名映射不需要文件描述符
+
+      if (ptr == MAP_FAILED) {  // mmap失败返回特殊值
+          ptr = nullptr;
+      }
+    #endif
+
+      if (ptr == nullptr) {
+          throw std::bad_alloc();  // 修正异常命名空间
+      }
+      return ptr;  // 删除多余的return语句
+  }
 
 static void*& NextObj(void* obj) {
     return *(void**)obj;
@@ -38,6 +77,32 @@ public:
         //*(void**)obj= _freeList;
         NextObj(obj) = _freeList;
         _freeList = obj;
+        ++_size;
+    }
+
+    void PushRang(void* start, void* end,size_t n) {
+        NextObj(end) = _freeList;
+        _freeList = start;
+        _size += n;
+    }
+
+    void PopRange(void*& start, void*& end, size_t n) {
+       /* assert(n <= _size);*/
+        assert(n >= _size);
+        start = _freeList;
+        end = start;
+
+        for (size_t i = 0; i < n - 1; ++i) {
+            end = NextObj(end);
+        }
+
+        _freeList = NextObj(end);
+        NextObj(end) = nullptr;
+        _size -= n;
+    }
+
+    size_t Size() {
+        return _size;
     }
 
     void* Pop() {
@@ -45,14 +110,22 @@ public:
         //头删
         void* obj = _freeList;
         _freeList = NextObj(obj);
+        --_size;
         return obj;
+        
     }
 
     bool Empty() {
         return _freeList == nullptr;
     }
+
+    size_t& MaxSize() {
+        return _maxSize;
+    }
 private:
     void* _freeList = nullptr;
+    size_t _maxSize = 1;
+    size_t _size = 0;
 };
 
 
@@ -141,6 +214,37 @@ public:
         }
         return -1;
     }
+
+    //一次threadcache从中心缓存获取多少个
+    static size_t NumMoveSize(size_t size) {
+        assert(size > 0);
+
+        //[2,512],一次批量移动多少个对象的上限值
+        //小对象一次批量上限高
+        //小对象一次批量上限低
+        int num = MAX_BYTES / size;
+        if (num < 2)
+            return 1; //return 0;
+        
+        if (num > 512)
+            num = 512;
+        return num;
+    }
+
+    //计算一次向系统获取几个页
+    //单个对象 8bytes
+    //。。。
+    //单个对象256kB
+    static size_t NumMovePage(size_t size) {
+        //size_t num = NumMovePage(size);
+        size_t num = NumMoveSize(size);
+        size_t npage = num * size;
+
+        npage >>= PAGE_SHIFT;
+        if (npage == 0)
+            npage = 1;
+        return npage;
+    }
 };
 
 //管理多个连续页的大块内存跨度结构
@@ -154,6 +258,8 @@ struct Span {
     size_t _useCount = 0;  //切好小块内存，被分配给thread cache的计数
     void* _freeList = nullptr;   //切好的小块内存的自由链表
 
+    bool _isUse = false; //是否再被使用
+
 };
 
 //带头双向循环链表
@@ -166,6 +272,28 @@ public:
         _head->_prev = _head;
     }
 
+    Span* Begin() {
+        return _head->_next;
+    }
+
+    Span* End() {
+        return _head;
+    }
+
+    bool Empty() {
+        return _head->_next == _head;
+    }
+
+    void PushFront(Span* span) {
+        Insert(Begin(), span);
+    }
+
+    Span* PopFront() {
+        Span* front = _head->_next;
+        Erase(front);
+        return front;
+    }
+
     void Insert(Span* pos, Span* newSpan) {
         assert(pos);
         assert(newSpan);
@@ -176,6 +304,7 @@ public:
         newSpan->_prev = prev;
         newSpan->_next = pos;
         pos->_prev = newSpan;
+        
     }
 
     void Erase(Span* pos) {
@@ -193,5 +322,6 @@ public:
 
 private:
     Span* _head;
+public:
     std::mutex _mtx;     //桶锁
 };

@@ -19,6 +19,7 @@
 //     }
 //     return ptr;
 // }
+/*
 inline static void* SystemAlloc(size_t kpage) {
     void* ptr = nullptr;
 
@@ -44,6 +45,8 @@ inline static void* SystemAlloc(size_t kpage) {
     }
     return ptr;  // 删除多余的return语句
 }
+
+*/
 
 //定长内存池
 //template<size_t N>
