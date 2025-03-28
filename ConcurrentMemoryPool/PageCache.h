@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Common.h"
+#include "ObjectPool.h"
 
 class PageCache {
 public:
@@ -20,11 +21,12 @@ public:
 	std::mutex _pageMtx;
 private:
 	SpanList _spanLists[NPAGES];
+	ObjectPool<Span> _spanPool;
 	std::unordered_map<PAGE_ID, Span*> _idSpanMap;
+	//std::unordered_map<PAGE_ID, size_t> _idSizeMap;
 
-	PageCache() {
-
-	}
+	PageCache() 
+	{}
 	PageCache(const PageCache&) = delete;
 
 	static PageCache _sInst;

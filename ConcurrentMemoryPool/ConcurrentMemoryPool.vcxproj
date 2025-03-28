@@ -27,6 +27,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="BenchMark.cpp" />
     <ClCompile Include="CentralCache.cpp" />
     <ClCompile Include="PageCache.cpp" />
     <ClCompile Include="Test.cpp" />

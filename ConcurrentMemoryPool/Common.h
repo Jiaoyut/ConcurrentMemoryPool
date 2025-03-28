@@ -64,6 +64,14 @@ inline static void* SystemAlloc(size_t kpage) {
       return ptr;  // 删除多余的return语句
   }
 
+inline static void SystemFree(void* ptr) {
+#ifdef _WIN32
+    VirtualFree(ptr, 0, MEM_RELEASE);
+#else
+    //linux/maxos下 sbrk unmmap等
+#endif
+}
+
 static void*& NextObj(void* obj) {
     return *(void**)obj;
 }
@@ -83,6 +91,18 @@ public:
     void PushRang(void* start, void* end,size_t n) {
         NextObj(end) = _freeList;
         _freeList = start;
+
+        //测试验证+条件断点
+        /*int i = 0;
+        void* cur = start;
+        while (cur) {
+            cur = NextObj(cur);
+            ++i;
+        }
+        if (i != n) {
+           i = 0;
+        }*/
+
         _size += n;
     }
 
@@ -170,8 +190,9 @@ public:
             return _RoundUp(size, 8 * 1024);
         }
         else {
-            assert(false);
-            return -1;
+            return _RoundUp(size, 1 << PAGE_SHIFT);
+            /*assert(false);
+            return -1;*/
         }
     }
 
@@ -255,6 +276,7 @@ struct Span {
     Span* _next =nullptr;      //双向链表的结构
     Span* _prev = nullptr;
 
+    size_t _objSize = 0;    //切好的小对象的大小
     size_t _useCount = 0;  //切好小块内存，被分配给thread cache的计数
     void* _freeList = nullptr;   //切好的小块内存的自由链表
 
@@ -310,6 +332,12 @@ public:
     void Erase(Span* pos) {
         assert(pos);
         assert(pos != _head);
+
+        //1.条件断点
+        //2.查看栈帧
+       /* if (pos == _head) {
+            int x = 0;
+        }*/
 
         Span* prev = pos->_prev;
         Span* next = pos->_next;
